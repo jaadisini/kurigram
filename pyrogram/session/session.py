@@ -92,8 +92,7 @@ class Session:
         self.auth_key_id = sha1(auth_key).digest()[-8:]
 
         self.session_id = os.urandom(8)
-        self.msg_factory = MsgFactory()
-
+        self.msg_factory = MsgFactory(self.client)
         self.salt = 0
 
         self.pending_acks = set()
