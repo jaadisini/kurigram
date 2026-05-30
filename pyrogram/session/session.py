@@ -352,7 +352,7 @@ class Session:
     async def send(
         self, data: TLObject, wait_response: bool = True, timeout: float = WAIT_TIMEOUT
     ):
-        message = self.msg_factory(data)
+        message = await self.msg_factory.create(data)
         msg_id = message.msg_id
 
         if wait_response:
