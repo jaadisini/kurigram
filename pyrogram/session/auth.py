@@ -22,7 +22,6 @@ import time
 from hashlib import sha1
 from io import BytesIO
 from os import urandom
-from typing import Optional
 
 import pyrogram
 from pyrogram import raw
@@ -30,6 +29,7 @@ from pyrogram.connection import Connection
 from pyrogram.crypto import aes, rsa, prime
 from pyrogram.errors import SecurityCheckMismatch
 from pyrogram.raw.core import TLObject, Long, Int
+from .internals import MsgId
 
 log = logging.getLogger(__name__)
 
@@ -37,32 +37,19 @@ log = logging.getLogger(__name__)
 class Auth:
     MAX_RETRIES = 5
 
-    def __init__(
-        self,
-        client: "pyrogram.Client",
-        dc_id: int,
-        server_address: str,
-        port: int,
-        test_mode: bool
-    ):
-        self.client = client
+    def __init__(self, client: "pyrogram.Client", dc_id: int, test_mode: bool):
         self.dc_id = dc_id
-        self.server_address = server_address
-        self.port = port
         self.test_mode = test_mode
         self.ipv6 = client.ipv6
         self.proxy = client.proxy
-        self.connection_factory = client.connection_factory
-        self.protocol_factory = client.protocol_factory
-        self.loop = client.loop
 
-        self.connection: Optional[Connection] = None
+        self.connection = None
 
     @staticmethod
-    def pack(data: TLObject, server_time: float) -> bytes:
+    def pack(data: TLObject) -> bytes:
         return (
             bytes(8)
-            + Long(int(server_time * (2**32)) & ~0b11)
+            + Long(MsgId())
             + Int(len(data.write()))
             + data.write()
         )
@@ -73,7 +60,7 @@ class Auth:
         return TLObject.read(b)
 
     async def invoke(self, data: TLObject):
-        data = self.pack(data, server_time=self.client.server_time)
+        data = self.pack(data)
         await self.connection.send(data)
         response = BytesIO(await self.connection.recv())
 
@@ -89,16 +76,7 @@ class Auth:
         # The server may close the connection at any time, causing the auth key creation to fail.
         # If that happens, just try again up to MAX_RETRIES times.
         while True:
-            self.connection = self.connection_factory(
-                dc_id=self.dc_id,
-                server_address=self.server_address,
-                port=self.port,
-                test_mode=self.test_mode,
-                proxy=self.proxy,
-                media=False,
-                protocol_factory=self.protocol_factory,
-                loop=self.loop
-            )
+            self.connection = Connection(self.dc_id, self.test_mode, self.ipv6, self.proxy)
 
             try:
                 log.info("Start creating a new auth key on DC%s", self.dc_id)
@@ -287,9 +265,6 @@ class Auth:
                 log.debug("Server salt: %s", int.from_bytes(server_salt, "little"))
 
                 log.info("Done auth key exchange: %s", set_client_dh_params_answer.__class__.__name__)
-            except ConnectionError as e:
-                log.info("Unable to connect due to network issues.")
-                raise e
             except Exception as e:
                 log.info("Retrying due to %s: %s", type(e).__name__, e)
 
